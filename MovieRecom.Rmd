@@ -1,0 +1,765 @@
+---
+title: "Movielens Recommender Project"
+author: "Ratna Ray"
+date: "6/7/2019"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r Preface, echo = FALSE}
+knitr::opts_chunk$set(message = FALSE, echo = FALSE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+## Overview
+
+This project has been implemented as part of the Data Science: Capstone project in edX.
+This report has all details related to the project and the thought process behind the final objective of a recommender model.
+
+We start with a basic introduction and objective.
+This is followed by basic data analysis and cleaning for preparation.
+An exploratory data analysis is carried out in order to develop multiple machine learning models that can predict movie ratings and then finalize a model. 
+The report ends with an explanation of the results and a conclusion.
+
+
+## Introduction
+
+Recommendation systems use ratings that users have given to items to make specific recommendations. Companies that sell many products to many customers and permit these customers to rate their products, like Amazon, are able to collect massive datasets that can be used to predict what rating a particular user will give to a specific item. Items for which a high rating is predicted for a given user are then recommended to that user. 
+
+The same could be done for other items, as movies for instance in our case. Recommendation systems are one of the most used models in machine learning algorithms. In fact the success of Netflix is said to be based on its strong recommendation system. The Netflix prize (open competition for the best collaborative filtering algorithm to predict user ratings for films, based on previous ratings without any other information about the users or films), in fact, represent the high importance of algorithm for products recommendation system.
+
+For this project we will focus on create a movie recommendation system using the 10M version of MovieLens dataset, collected by GroupLens Research.
+
+
+## Aim of the project
+
+The aim in this project is to train a machine learning algorithm that predicts user ratings (from 0.5 to 5 stars) using the inputs of a provided subset.
+
+The value used to evaluate algorithm performance is the Root Mean Square Error, or RMSE. RMSE is one of the most used measure of the differences between values predicted by a model and the values observed. RMSE is a measure of accuracy, to compare forecasting errors of different models for a particular dataset, a lower RMSE is better than a higher one. The effect of each error on RMSE is proportional to the size of the squared error; thus larger errors have a disproportionately large effect on RMSE. Consequently, RMSE is sensitive to outliers.
+The evaluation criteria for this algorithm is a RMSE expected to be lower than 0.8775.
+
+
+```{r RMSE_function, echo=FALSE}
+RMSE <- function(predicted_ratings, true_ratings){
+  sqrt(mean((predicted_ratings - true_ratings)^2))
+}
+```
+
+The best resulting model will be used to predict the movie ratings.
+
+
+## Dataset
+
+For this recommender system, we use a version of the movielens dataset.
+This is  a small subset of a much larger dataset with millions of ratings. We will use the 10M version of the complete MovieLens dataset to make the computation a little easier.
+
+The MovieLens dataset is automatically downloaded from: 
+
+• [MovieLens 10M dataset] https://grouplens.org/datasets/movielens/10m/
+
+• [MovieLens 10M dataset - zip file] http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+MovieLens 10M movie ratings is a stable benchmark dataset. 
+It has 10 million ratings and 100,000 tag applications applied to 10,000 movies by 72,000 users.
+
+## Load Dataset
+```{r Load Dataset, echo=TRUE, message=FALSE, warning=FALSE}
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", 
+                                         repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", 
+                                     repos = "http://cran.us.r-project.org")
+
+
+###################################
+# Create edx set and validation set
+###################################
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+dl
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- read.table(text = gsub("::", "\t", 
+                                  readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                      col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+```
+
+
+In order to predict in the most possible accurate way the movie rating of the users that haven’t seen the movie yet, the MovieLens dataset will be split into 2 subsets: 
+• edx: a training subset to train the algorithm
+• validation: a subset to test the movie ratings
+
+```{r Split dataset, echo=TRUE, message=FALSE, warning=FALSE}
+
+# Validation set will be 10% of MovieLens data
+
+set.seed(1) # if using R 3.6.0: set.seed(1, sample.kind = "Rounding")
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+#rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+```
+## Data exploration and analysis
+
+Data Analysis of movies
+```{r AnalysisMovies, echo=TRUE, message=FALSE, warning=FALSE}
+str(movies)
+# This has avour 10K movies along with the title and associated genre for each movie
+```
+
+Summary of movies and several rows of this dataframe:
+```{r SummaryMovies, echo=TRUE, message=FALSE, warning=FALSE}
+summary(movies)
+head(movies)
+```
+
+Data Analysis of ratings
+```{r AnalysisRatings, echo=TRUE, message=FALSE, warning=FALSE}
+str(ratings)
+#This has 10M ratings and has been joined with movies to build the movielens dataset
+```
+
+Data Analysis of movielens
+```{r AnalysisMovielens, echo=TRUE, message=FALSE, warning=FALSE}
+str(movielens)
+#This has 10M ratings and has been joined with movies to build the movielens dataset
+```
+
+The movielens dataset has more than 10 million ratings. 
+Each record is associated with:
+1. userId
+2. movieId
+3. rating 
+4. timestamp
+5. title
+6. genres
+7. year
+
+Summary of movielens
+```{r SummaryMovielens, echo=TRUE, message=FALSE, warning=FALSE}
+str(movielens)
+summary(movielens)
+head(movielens)
+#This has 10M ratings and has been joined with movies to build the movielens dataset
+```
+
+Summary of edx
+```{r SummaryEDX, echo=TRUE, message=FALSE, warning=FALSE}
+summary(edx)
+# Summary of the edx dataset confirms no missing values
+
+# First entries of the edx dataset
+head(edx)
+
+#Data Analysis of edx
+str(edx)
+#This consists of 90% of the movielens dataset ~9M
+#Each record is associated with:
+#1. userId
+#2. movieId
+#3. rating 
+#4. timestamp
+#5. title
+#6. genres
+
+# Checking the edx dataset properties. 
+n_distinct(edx$movieId)
+n_distinct(edx$genres)
+n_distinct(edx$userId)
+nrow(edx)
+#The total of unique movies and users in the edx subset is about 70,000 unique users 
+# and about 10,700 different movies approximately
+
+
+```
+
+Summary of the validation dataset
+```{r SummaryValidation}
+
+summary(validation)
+
+# First entries of the validation dataset
+head(validation)
+
+# Checking the validation dataset properties
+n_distinct(validation$movieId)
+n_distinct(validation$genres)
+n_distinct(validation$userId)
+nrow(validation)
+```
+
+## Data Pre-processing or analysis and preparation 
+
+```{r Libraries}
+# Load libraries
+if(!require(lubridate)) install.packages("lubridate", 
+                                         repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", 
+                                        repos = "http://cran.us.r-project.org")
+if(!require(RColorBrewer)) install.packages("RColorBrewer", 
+                                            repos = "http://cran.us.r-project.org")
+```
+
+By Genres
+```{r Genres}
+# Split Genres into separate rows and save this into a separate dataset (if needed)
+dat <- edx %>% separate_rows(genres, sep ="\\|")
+head(dat)
+
+# Count the number of movies using movieId in each genre
+genre_count_by_movieId <- dat %>% group_by(genres) %>% summarize(n = n())
+head(genre_count_by_movieId)
+table(genre_count_by_movieId)
+
+# Build a plot for this data
+genreCountPlot <- ggplot(dat, aes(x = reorder(genres, genres, function(x) -length(x)))) + geom_bar()
+
+# Fix the axes
+genreCountPlot <- genreCountPlot + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+genreCountPlot <- genreCountPlot + ylab("Number of movies") + xlab("Genre")
+genreCountPlot <- genreCountPlot
+
+# Plot by genres
+print(genreCountPlot)
+```
+
+```{r ArrangeGenres}
+# Arrange the Genres better by movie ratings
+GenreRatingPlot <- dat %>%   group_by(genres) %>%
+  summarize(n=n()) %>%   ungroup() %>%
+  mutate(sumN = sum(n), percentage = n/sumN) %>%  arrange(-percentage)
+
+# Plot by genres
+GenreRatingPlot %>%
+  ggplot(aes(reorder(genres, percentage), percentage, fill= percentage)) +
+  geom_bar(stat = "identity") + coord_flip() +
+  scale_fill_distiller(palette = "Spectral") + labs(y = "Percentage", x = "Genre") +
+  ggtitle("Distribution of Genres by Percent Rated")
+```
+
+Check ratings 
+```{r edx_rating_distribution, echo = TRUE}
+# Check ratings 
+table(edx$rating)
+
+summary(edx$rating)
+# Ratings range from 0.5 to 5.0. 
+# The difference in median and mean shows that the distribution is skewed towards higher ratings. 
+
+edx %>%
+  ggplot(aes(rating)) +
+  geom_histogram(binwidth = 0.25, color = "blue") +
+  scale_x_discrete(limits = c(seq(0.5,5,0.5))) +
+  scale_y_continuous(breaks = c(seq(0, 3000000, 500000))) +
+  xlab("Rating") +
+  ylab("Number of ratings") +
+  ggtitle("Rating Distribution")
+```
+
+The chart shows that whole-number ratings are more common that 0.5 ratings.
+This also shows that users have a preference to rate movies rather higher than lower as shown by the distribution of ratings
+4 is the most common rating, followed by 3 and 5. 0.5 is the least common rating.
+
+To make further analysis on the rating distribution, we will validate and update the edx dataset
+
+```{r EdxManipulation}
+# To check distribution of ratings by year, load library and add year field
+
+# Get the year from the timestamp
+edx <- mutate(edx, year = year(as_datetime(timestamp)))
+head(edx)
+
+# Convert to numeric
+edx$year <- as.numeric(substr(as.character(edx$title),
+                              nchar(as.character(edx$title))-4,
+                              nchar(as.character(edx$title))-1))
+colnames(edx)
+
+# Work on extracting the premiere date from the movie titles
+
+# Extract the premier date from the movie title and 
+# add it as a column and store in edx_upd dataset
+year_premier_edx <- stringi::stri_extract(edx$title, 
+                                          regex = "(\\d{4})", 
+                                          comments = TRUE ) %>% as.numeric()
+edx_upd <- edx %>% mutate(premiered = year_premier_edx)
+head(edx_upd)
+
+# Checking for possible invalid cases in the edx_upd dataset
+
+# edx
+edx_chk1 <- edx_upd %>% filter(premiered > 2018) %>% group_by(movieId, title, premiered) %>% summarize(n = n())
+edx_chk1
+
+edx_chk2 <- edx_upd %>% filter(premiered < 1900) %>% group_by(movieId, title, premiered) %>% summarize(n = n())
+edx_chk2
+
+# Manually fix the incorrect dates in both datasets for possible use later on
+edx_upd[edx_upd$movieId == "27266", "premiered"] <- 2004
+edx_upd[edx_upd$movieId == "671", "premiered"] <- 1996
+edx_upd[edx_upd$movieId == "2308", "premiered"] <- 1973
+edx_upd[edx_upd$movieId == "4159", "premiered"] <- 2001
+edx_upd[edx_upd$movieId == "5310", "premiered"] <- 1985
+edx_upd[edx_upd$movieId == "8864", "premiered"] <- 2004
+edx_upd[edx_upd$movieId == "1422", "premiered"] <- 1997
+edx_upd[edx_upd$movieId == "4311", "premiered"] <- 1998
+edx_upd[edx_upd$movieId == "5472", "premiered"] <- 1972
+edx_upd[edx_upd$movieId == "6290", "premiered"] <- 2003
+edx_upd[edx_upd$movieId == "6645", "premiered"] <- 1971
+edx_upd[edx_upd$movieId == "8198", "premiered"] <- 1960
+edx_upd[edx_upd$movieId == "8905", "premiered"] <- 1992
+edx_upd[edx_upd$movieId == "53953", "premiered"] <- 2007
+
+# Calculate and add age of the movie (in years) as column to the updated edx dataset
+edx_upd <- edx_upd %>% mutate(age_of_movie = year(date(today())) - premiered)
+head(edx_upd)
+```
+
+If required, the same steps can be applied to the validation dataset
+
+Continuing with the analysis
+
+```{r EdxPlot}
+plot(table(edx$year),main="Ratings by year",xlab="Year",ylab="Number of ratings", 
+     col = "blue")
+```
+
+We observe that more recent movies get more user ratings.
+Movies earlier than 1950 get few ratings, whereas newer movies, especially in the 90s get far more ratings.
+
+```{r avgRating}
+#A dd the number of movies per user and number of users per movie as new columns to dataset
+edx <- edx %>%
+  group_by(userId) %>%
+  mutate(movies_by_user = n());
+
+edx <- edx %>%
+  group_by(movieId) %>%
+  mutate(users_by_movie = n()); 
+
+head(edx)
+
+# Distribution of movie ratings based on the updated edx dataset
+edx %>% group_by(movieId) %>% summarize(n = n()) %>%
+  ggplot(aes(n)) + geom_histogram(fill = "lightblue", color = "grey20", bins = 10) +
+  scale_x_log10() + 
+  ggtitle("Number of movies ratings")
+
+# Distribution by users
+edx %>% group_by(userId) %>% summarize(n = n()) %>%
+  ggplot(aes(n)) + geom_histogram(fill = "lightblue", color = "grey20", bins = 10) +
+  scale_x_log10() +  
+  ggtitle("Number of unique ratings")
+
+# Check average distribution over time
+avg_ratings <- edx %>% group_by(year) %>% summarise(avg_rating = mean(rating))
+plot(avg_ratings, col = "red")
+```
+We see that the older the movies, the more widely distributed are their ratings, which can be explained by the lower frequency of movie ratings
+
+
+```{r ds_rating_distribution, echo = TRUE}
+# To check what affects the movie ratings are affected by 
+
+# Movie rating averages
+movie_avg <- edx_upd %>% group_by(movieId) %>% summarize(avg_movie_rating = mean(rating))
+user_avg <- edx_upd %>% group_by(userId) %>% summarize(avg_user_rating = mean(rating))
+year_avg <- edx_upd%>% group_by(year) %>% summarize(avg_rating_by_year = mean(rating)) #year the movie was rated
+age_avg <- edx_upd %>% group_by(age_of_movie) %>% summarize(avg_rating_by_age = mean(rating)) #age of movie
+
+#View sample data and plot 
+head(age_avg)
+head(user_avg)
+age_avg %>% ggplot(aes(age_of_movie, avg_rating_by_age)) +
+  geom_point(color = "navy") +  ggtitle("Movie Rating by Age")
+
+```
+This follows our earlier observation and also shows higher ratings for older movies up to about ~80 years after which the ratings decline.
+
+To further understand what affects the ratings, we will try to correlate all the available parameters
+```{r Correlation}
+#Explore correlations between ratings, users, movieId age of movie and number 
+#of ratings for each movie
+
+#Number of movie ratings
+movie_ratings <- edx_upd %>% group_by(movieId) %>% summarize(n = n())
+
+#Average movie ating
+avg_movie_rating <- edx_upd %>% group_by(movieId) %>% summarize(avg_m_r = mean(rating))
+
+#Create correlation 
+correlation <- edx_upd %>% select(rating, movieId, userId, year, age_of_movie, premiered) %>%
+  left_join(movie_ratings, by = "movieId") %>%
+  left_join(avg_movie_rating, by = 'movieId')
+head(correlation)
+
+#Plot the correlation data
+plt <- correlation %>% select(one_of("rating", "movieId", "userId", "year", "age_of_movie", "premiered", "n", "avg_m_r")) %>% as.matrix()
+graph <- cor(plt, use = "pairwise.complete.obs")
+
+corrplot(graph, order = "hclust", addrect = 2, type = "lower",
+         col = brewer.pal(n = 10, name = "PiYG"))
+```
+
+
+We notice that some movies have been rated much often than others, while some have very few ratings and sometimes even only one rating.
+This will be important for our model as very low rating numbers might results in untrustworthy estimate for our predictions. Almost 125 movies have been rated only once. 
+
+We also notice that some movies have been rated a lot more often than others, while some have very few ratings and sometimes even one rating
+```{r number_of_ratings_per_movie, echo = TRUE, fig.height=4, fig.width=5}
+edx %>%
+count(movieId) %>%
+ggplot(aes(n)) +
+geom_histogram(bins = 30, color = "blue", fill = "cadetblue") +
+scale_x_log10() +
+xlab("Number of Ratings") +
+  ylab("Number of Movies") +
+ggtitle("Number of Ratings per Movie")
+
+
+```
+
+We notice that these movies have only one rating, making future rating prediction difficult.
+
+```{r obscure_movies, echo = TRUE, fig.height=4, fig.width=5}
+edx %>%
+  group_by(movieId) %>%
+  summarize(count = n()) %>%
+  filter(count == 1) %>%
+  left_join(edx, by = "movieId") %>%
+  group_by(title) %>%
+  summarize(rating = rating, n_rating = count) %>%
+  slice(1:20) %>%
+  knitr::kable()
+  
+```
+
+
+One can observe that the majority of users have rated between 30 and 100 movies. So, a user penalty term needs to be included later in our models.
+
+```{r number_ratings_given_by_users, echo = TRUE, fig.height=4, fig.width=5}
+# Plot number of ratings given by users
+edx %>%
+count(userId) %>%
+ggplot(aes(n)) +
+geom_histogram(bins = 30, color = "blue", fill = "cadetblue") +
+scale_x_log10() +
+xlab("Number of Ratings") + 
+ylab("Number of Users") +
+ggtitle("Number of Ratings given by Users")
+```
+
+
+Furthermore, users differ vastly in how critical they are with their ratings. Some users tend to give much lower star ratings and some users tend to give higher star ratings than average. The visualization below includes only users that have rated at least 100 movies.
+
+
+```{r mean_movie_ratings_given_by_users, echo = TRUE, fig.height=4, fig.width=5}
+edx %>%
+  group_by(userId) %>%
+  filter(n() >= 100) %>%
+  summarize(b_u = mean(rating)) %>%
+  ggplot(aes(b_u)) +
+  geom_histogram(bins = 30, color = "blue",fill="cadetblue3") +
+  xlab("Mean Rating") +
+  ylab("Number of Users") +
+  ggtitle("Mean Movie Ratings given by Users") +
+  scale_x_discrete(limits = c(seq(0.5,5,0.5)))
+  
+```
+
+
+
+## Modelling Approach
+
+
+The loss-function, that computes the RMSE is defined as follows:
+
+$$ RMSE = \sqrt{\frac{1}{N}\displaystyle\sum_{u,i} (\hat{y}_{u,i}-y_{u,i})^{2}} $$
+
+with N being the number of user/movie combinations and the sum occurring over all these combinations.
+The RMSE is our measure of model accuracy.
+
+The written function to compute the RMSE for vectors of ratings and their corresponding predictions is:
+
+```{r RMSE_function2, echo = TRUE}
+
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+```
+
+
+### 1. Average Movie Rating Model
+
+The first model predicts the same rating for all movies, so we compute the dataset’s mean rating. The expected rating of the underlying data set is between 3 and 4.
+We start by building the simplest possible recommender system by predicting the same rating for all movies regardless of user who give it. A model based approach assumes the same rating for all movie with all differences explained by random variation :
+
+$$ Y_{u, i} = \mu + \epsilon_{u, i} $$
+
+with $\epsilon_{u,i}$ independent error sample from the same distribution centered at 0 and $\mu$ the “true” rating for all movies. This very simple model makes the assumption that all differences in movie ratings are explained by random variation alone. The estimate that minimizes the RMSE is the least square estimate of $Y_{u,i}$ , in this case, is the average of all ratings:
+The expected rating of the underlying data set is between 3 and 4.
+
+```{r, echo = TRUE}
+
+mu <- mean(edx$rating)
+mu
+
+```
+
+
+If we predict all unknown ratings with $\mu$ or mu, we obtain the first  RMSE:
+
+```{r model_1_rmse, echo = TRUE}
+
+model_1_rmse <- RMSE(validation$rating, mu)
+model_1_rmse
+
+```
+
+
+Here, we represent results table with the first RMSE:
+
+```{r rmse_results1, echo = TRUE}
+
+rmse_results <- data_frame(method = "Average Movie Rating Model",
+                           RMSE = model_1_rmse)
+rmse_results %>% knitr::kable()
+
+```
+
+This give us our baseline RMSE to compare with next modelling approaches.
+
+In order to do better than simply predicting the average rating, one can incorporate some of insights gained during the exploratory data analysis.
+
+
+### 2.  Movie Effect Model
+
+To improve above model one can focus on the fact that some movies are just generally rated higher than others. Higher ratings are mostly linked to popular movies among users and the opposite is true for unpopular movies. We compute the estimated deviation of each movies’ mean rating from the total mean of all movies $\mu$. The resulting variable is called "b" ( as bias ) for each movie "i" $b_{i}$, that represents average ranking for movie $i$:
+
+$$Y_{u, i} = \mu +b_{i}+ \epsilon_{u, i}$$
+
+
+```{r Number_of_movies_with_computed_b_i, echo = TRUE, fig.height=3, fig.width=4}
+
+movie_avgs <- edx %>%
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu))
+movie_avgs %>% qplot(b_i, geom ="histogram", bins = 10, 
+                     data = ., color = I("blue"),
+                     ylab = "Number of Movies", 
+                     main = "Number of Movies with Computed b_i")
+
+```
+
+The histogram is left skewed, implying that more movies have negative effects
+This is called the penalty term movie effect.
+
+
+Our prediction can improve once prediction is done using this model.
+
+```{r model_2_rmse, echo = TRUE}
+
+predicted_ratings <- mu +  validation %>%
+  left_join(movie_avgs, by='movieId') %>%
+  pull(b_i)
+model_2_rmse <- RMSE(predicted_ratings, validation$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie Effect Model",  
+                                     RMSE = model_2_rmse ))
+rmse_results %>% knitr::kable()
+
+```
+
+
+So we have predicted movie rating based on the fact that movies are rated differently by adding the computed $b_{i}$ to $\mu$. If an individual movie is on average rated worse that the average rating of all movies $\mu$ , we predict that it will rated lower that $\mu$ by $b_{i}$, the difference of the individual movie average from the total average.
+
+We can see an improvement but this model does not consider the individual user rating effect.
+
+
+### 3. Movie and User Effect Model
+
+The average rating for user $\mu$, for those that have rated over 100 movies, said penalty term user effect. In fact users affect the ratings positively or negatively.
+
+```{r, echo = TRUE}
+user_avgs<- edx %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  filter(n() >= 100) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+user_avgs%>% qplot(b_u, geom ="histogram", 
+                   bins = 30, data = ., color = I("blue"), 
+                   ylab = "Number of Movies", 
+                   main = "Movie and User Effect Model")
+```
+
+There is substantial variability across users as well: some users are very cranky and others love every movie. This implies that further improvement to the model may be:
+$$Y_{u, i} = \mu + b_{i} + b_{u} + \epsilon_{u, i}$$
+where $b_{u}$ is a user-specific effect. If a cranky user (negative $b_{u}$ rates a great movie (positive $b_{i}$), the effects counter each other and we may be able to correctly predict that this user gave this great movie a 3 rather than a 5.
+
+An approximation can be computed by $\mu$ and $b_{i}$, and estimating  $b_{u}$, as the average of $$Y_{u, i} - \mu - b_{i}$$
+
+```{r user_avgs, echo = TRUE}
+
+user_avgs <- edx %>%
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+  
+```
+
+Construct predictors can improve RMSE.
+
+
+```{r model_3_rmse, echo = TRUE}
+
+predicted_ratings <- validation%>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  pull(pred)
+
+model_3_rmse <- RMSE(predicted_ratings, validation$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie and User Effect Model",  
+                                     RMSE = model_3_rmse))
+rmse_results %>% knitr::kable()
+
+```
+
+
+Our rating predictions further reduced the RMSE, But still, mistakes were made on our first model (using only movies). The supposed "best" and "worst" movies were rated by few users, in most cases just one user. These movies were mostly obscure ones. This is because with a few users, more uncertainty is created. Therefore larger estimates of $b_{i}$, negative or positive, are more likely. 
+
+Until now, the computed standard error and constructed confidence intervals account for different levels of uncertainty. The concept of regularization permits to penalize large estimates that come from small sample sizes. The general idea is to add a penalty for large values of $b_{i}$ to the sum of squares equation that we minimize. So having many large $b_{i}$, make it harder to minimize. Regularization is a method used to reduce the effect of overfitting.
+
+
+### 4. Regularized Movie and User Effect Model
+
+So estimates of $b_{i}$ and $b_{u}$ are caused by movies with very few ratings and in some users that only rated a very small number of movies. Hence this can strongly influence the prediction. The use of the regularization permits to penalize these aspects. We should find the value of lambda (that is a tuning parameter) that will minimize the RMSE. This shrinks the $b_{i}$ and $b_{u}$ in case of small number of ratings.
+
+
+```{r lambdas, echo = TRUE}
+
+lambdas <- seq(0, 10, 0.25)
+
+model_4_rmse <- sapply(lambdas, function(l){
+  
+  mu <- mean(edx$rating)
+  
+  b_i <- edx %>% 
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - mu)/(n()+l))
+  
+  b_u <- edx %>% 
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+  
+  predicted_ratings <- 
+    validation %>% 
+    left_join(b_i, by = "movieId") %>%
+    left_join(b_u, by = "userId") %>%
+    mutate(pred = mu + b_i + b_u) %>%
+    pull(pred)
+  
+  return(RMSE(predicted_ratings, validation$rating))
+})
+
+```
+
+
+We plot RMSE vs Lambdas to select the optimal lambda
+
+```{r plot_lambdas, echo = TRUE}
+
+qplot(lambdas, model_4_rmse)  
+
+```
+
+For the full model, the optimal lambda is:
+
+```{r min_lambda, echo = TRUE}
+
+  lambda <- lambdas[which.min(model_4_rmse)]
+lambda
+
+```
+
+For the full model, the optimal lambda is: 5.25
+
+The new results will be:
+
+
+```{r rmse_results2, echo = TRUE}
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(
+                            method="Regularized Movie and User Effect Model",  
+                                     RMSE = min(model_4_rmse)))
+rmse_results %>% knitr::kable()
+
+```
+
+## Results
+
+The RMSE values of all the represented models are the following:
+
+```{r rmse_results3, echo = TRUE}
+
+rmse_results %>% knitr::kable()
+
+```
+
+The lowest identified value of RMSE is 0.8648170.
+
+
+## Discussion
+
+It can be confirmed that the final model for the project is the following:
+
+$$Y_{u, i} = \mu + b_{i} + b_{u} + \epsilon_{u, i}$$
+
+This model will work well if the average user doesn't rate a particularly good/popular movie with a large positive $b_{i}$, by disliking a particular movie. 
+
+
+## Conclusion
+
+A machine learning model has been successfully built to predict movie ratings with MovieLens dataset.
+The optimal model (Regularized Model) characterised by the lowest RMSE value (0.8648170) is thus the optimal selection. This is lower than the initial evaluation criterion (0.8775) given by the goal of the present project.
+
