@@ -140,7 +140,7 @@ edx <- rbind(edx, removed)
 Data Analysis of movies
 ```{r AnalysisMovies, echo=TRUE, message=FALSE, warning=FALSE}
 str(movies)
-# This has avour 10K movies along with the title and associated genre for each movie
+# This has over 10K movies along with the title and associated genre for each movie
 ```
 
 Summary of movies and several rows of this dataframe:
@@ -152,13 +152,19 @@ head(movies)
 Data Analysis of ratings
 ```{r AnalysisRatings, echo=TRUE, message=FALSE, warning=FALSE}
 str(ratings)
-#This has 10M ratings and has been joined with movies to build the movielens dataset
+# This has 10M ratings and has been joined with movies to build the movielens dataset
+```
+
+Summary of ratings:
+```{r SummaryRatings, echo=TRUE, message=FALSE, warning=FALSE}
+summary(ratings)
+head(ratings)
 ```
 
 Data Analysis of movielens
 ```{r AnalysisMovielens, echo=TRUE, message=FALSE, warning=FALSE}
 str(movielens)
-#This has 10M ratings and has been joined with movies to build the movielens dataset
+# This has 10M ratings and has been joined with movies to build the movielens dataset
 ```
 
 The movielens dataset has more than 10 million ratings. 
@@ -173,10 +179,9 @@ Each record is associated with:
 
 Summary of movielens
 ```{r SummaryMovielens, echo=TRUE, message=FALSE, warning=FALSE}
-str(movielens)
 summary(movielens)
 head(movielens)
-#This has 10M ratings and has been joined with movies to build the movielens dataset
+# This has 10M ratings and has been joined with movies to build the movielens dataset
 ```
 
 Summary of edx
@@ -189,8 +194,8 @@ head(edx)
 
 #Data Analysis of edx
 str(edx)
-#This consists of 90% of the movielens dataset ~9M
-#Each record is associated with:
+# This consists of 90% of the movielens dataset ~9M
+# Each record is associated with:
 #1. userId
 #2. movieId
 #3. rating 
@@ -364,7 +369,7 @@ We observe that more recent movies get more user ratings.
 Movies earlier than 1950 get few ratings, whereas newer movies, especially in the 90s get far more ratings.
 
 ```{r avgRating}
-#A dd the number of movies per user and number of users per movie as new columns to dataset
+# A dd the number of movies per user and number of users per movie as new columns to dataset
 edx <- edx %>%
   group_by(userId) %>%
   mutate(movies_by_user = n());
@@ -403,7 +408,7 @@ user_avg <- edx_upd %>% group_by(userId) %>% summarize(avg_user_rating = mean(ra
 year_avg <- edx_upd%>% group_by(year) %>% summarize(avg_rating_by_year = mean(rating)) #year the movie was rated
 age_avg <- edx_upd %>% group_by(age_of_movie) %>% summarize(avg_rating_by_age = mean(rating)) #age of movie
 
-#View sample data and plot 
+# View sample data and plot 
 head(age_avg)
 head(user_avg)
 age_avg %>% ggplot(aes(age_of_movie, avg_rating_by_age)) +
@@ -451,7 +456,6 @@ scale_x_log10() +
 xlab("Number of Ratings") +
   ylab("Number of Movies") +
 ggtitle("Number of Ratings per Movie")
-
 
 ```
 
@@ -544,7 +548,7 @@ mu
 ```
 
 
-If we predict all unknown ratings with $\mu$ or mu, we obtain the first  RMSE:
+If we predict all unknown ratings with $\mu$ or mu, we obtain the first RMSE:
 
 ```{r model_1_rmse, echo = TRUE}
 
